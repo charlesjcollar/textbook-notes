@@ -160,6 +160,13 @@
   - A server can request clients slow down (_backpressure_).
 
 ### Latency and Response Time
+- The _response time_ is what the client sees.
+- The _service time_ is the duration for which a service is actively processing a request.
+- _Queueing delays_ can occur many places: in the process (e.g. waiting on IO or upstream), or networking queueing
+- _Latency_ is the catchall term for all the time where a request is not being actively processed.
+- Response time can be inconsistent due to many external (and sometimes random) factors: networks, garbage collection, cache miss, etc.
+- A few slow requests can cause large queueing delays for many fast requests behind it, known as _head-of-line blocking_.
+- It's important to measure response time from the client side.
 
 ### Average, Median, and Percentiles
 
