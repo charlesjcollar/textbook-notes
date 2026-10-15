@@ -169,8 +169,13 @@
 - It's important to measure response time from the client side.
 
 ### Average, Median, and Percentiles
+- Best to describe response time in percentiles instead of mean/average
+- Median is the 50th percentile, better for describing "average" time. Often look at the _tail latencies_ like the 95th, 99th, or 99.9th percentiles (abbreviated _p95_, _p99_, and _p999_ respectively)
 
 ### Use of Response Time Metrics
+- If a BFF calls multiple backend services, the response time of the BFF is the response time of the slowest backend service.
+- A _Serice level objective (SLO)_ describes expected performance and availability of a service (e.g. 99th percentile under 1 second, and 99.9% of valid requests have a non-error response).
+- A _Service level agreement (SLA)_ is a contract to describe what happens if the SLO isn't met (e.g. refund).
 
 ## Reliability and Fault Tolerance
 
