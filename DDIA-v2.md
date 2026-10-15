@@ -169,8 +169,8 @@
 - It's important to measure response time from the client side.
 
 ### Average, Median, and Percentiles
-- Best to describe response time in percentiles instead of mean/average
-- Median is the 50th percentile, better for describing "average" time. Often look at the _tail latencies_ like the 95th, 99th, or 99.9th percentiles (abbreviated _p95_, _p99_, and _p999_ respectively)
+- Best to describe response time in percentiles instead of mean/average.
+- Median is the 50th percentile, better for describing "average" time. Often look at the _tail latencies_ like the 95th, 99th, or 99.9th percentiles (abbreviated _p95_, _p99_, and _p999_ respectively).
 
 ### Use of Response Time Metrics
 - If a BFF calls multiple backend services, the response time of the BFF is the response time of the slowest backend service.
@@ -178,16 +178,67 @@
 - A _Service level agreement (SLA)_ is a contract to describe what happens if the SLO isn't met (e.g. refund).
 
 ## Reliability and Fault Tolerance
+- "Reliability" roughly means "continuing to work correctly when things go wrong".
+- A _fault_ is when a certain _part_ of the system stops working correctly, like a single machine crashing or a single service having an outage.
+- A _failure_ is when the system as a **whole** stops providing required service to the user. A failure is a breach of SLO.
 
 ### Fault Tolerance
+- A system is _fault tolerant_ if it can provide service to users despite certain faults. Any part of a system where a fault causes a failure is a _single point of failure (SPOF)_.
+- Fault tolerance has a limit, and it gets more expensive to be more fault tolerant.
+- By introducing faults via _fault injection_ (like killing random processes without warning), you can continually test and exercise fault-handling parts of systems. This discipline is also known as _chaos engineering_.
+- Sometimes need to prevent faults rather than tolerate them, like security, where unauthorized access cannot be tolerated ever.
 
 ### Hardwaree and Software Faults
+- Expect your hardware to fail! Basically all hardware (CPUs, RAM, disks, network cables, electricity) can fail and will eventually. Natural causes can make other stuff fail too.
+
+#### Tolerating hardware faults through redundancy
+- First method to reduce failure rate of a system: have redundant individual hardware components.
+- Best when component faults are independent (one fault doesn't trigger another fault).
+- Cloud systems focus less on reliability of individual machines, and instead tolerate faulty nodes at the software level ("distributed" software).
+- Even more effective when software is geographically separated / redundant.
+- Systems that can tolerate the loss of entire machines can also handle planned downtime without any downtime, e.g. via a rolling upgrade.
+
+#### Software faults
+- All nodes will have the same bugs: high correlation.
+- Software faults are harder to anticipate and can cause many more system failures.
+- Types of software faults:
+  - General bug in every node.
+  - Runaway process that eats up a shared, limited resource.
+  - Service becomes slow or unresponsive affects downstream services.
+  - Integration bugs between services.
+  - Cascading failures like overloading which brings down other components.
+- No quick easy solution: best to: 
+  - Carefully think about all assumptions and interactions.
+  - Thoroughly test.
+  - Ensure process isolation.
+  - Allow processes to crash and restart (and assume they will).
+  - Avoid feedback loops like retry storms.
+  - Monitor and analyze behavior and metrics in production.
 
 ### Humans and Reliability
+- Inevitable, and blaming doesn't solve anything.
+- Best to try to just minimize the **impact**:
+  - Rollback mechanisms.
+  - Gradual rollouts of new code.
+  - Detailed and clear monitoring and alerts.
 
 ## Scalability
+- A new product with a small number of users will prioritize on system simplicity and flexibility rather than scalability.
+- If an application becomes popular and load grows, **then** learn where the bottlenecks are and which dimensions you need to scale.
 
 ### Understanding Load
+- Often measure a throughput: requests per second, GB of new data per day, etc. some _amount per time-unit_.
+- Other statistics are important too, like:
+  - Ratio of reads to writes in a db.
+  - Hit rate on a cache.
+  - Amount of data / items per user.
+- Sometimes we care about the average load / case, sometimes peak/outlier/extreme/edge cases.
+- When considering load increase, consider:
+  - If load increases and system resources stay the same, how is the performance affected?
+  - If load increases, how much resource increases is needed to keep performance the same?
+- Need to balance these two: keep within SLAs while minimizing costs.
+- _Linear scalability_ means adding x times of resources leads to x times higher throughput. Considered a good thing.
+  - More likely, costs grow faster than linearly.
 
 ### Shared-Memory, Shared-Disk, and Shared-Nothing Architectures
 
