@@ -273,11 +273,11 @@
   - Avoid dependency on individual machines
   - Documentation
   - Good default behavior, and allowing overrides
-  - Self-healing (when appropriate),
+  - Self-healing (when appropriate)
   - Predictable behavior
 
 ### Simplicity: Managing Complexity
-- Rather subjective
+- Rather subjective.
 - _Essential complexity_ is inherent to the domain/problem, _accidental complexity_ arises because of limitations of the tooling.
 - Abstraction is the best tool we have against complexity.
 
@@ -286,40 +286,81 @@
 - Irreversibility is difficult (e.g. migrating from one database to another). Minimizing irreversibility improves flexibility.
 
 # Chapter 3: Data Models and Query Languages
+1. Real world is modeled in terms of objects or data structures adn APIs to manipulate them.
+2. These objects are expressed in a general-purpose data model, like JSON/SML, DB tables, graph edges/verticies.
+3. DB engineers decided on a way to represent document/relational/graph data as bytes/memory/disk/network.
+4. Hardware engineers represent bytes as electrical currents, etc.
+- A _declarative_ query language allows description of the pattern of the data (source, transformation, grouping, sorting, etc.) but **not how** this is achieved. This is different than most programming languages which describe how something should be done.
+
 ## Relational vs Document Models
+- SQL is the most popular: data is organized into _relations_ aka _tables_ with each relation an unordered collection of _tuples_ aka _rows_.
+- SQL became tool of choice in the mid-80s.
+- SQL reigns supreme with many coup attempts. NoSQL in the 2010s popularlized the _document model_ which represents data as JSON.
+
 ### The Object-Relational Mismatch
+- The translation layer between objects in an OOP and the database objects is called an _impedance mismatch_.
+
+#### Object-relational mapping
+- An _Object-relational mapping (ORM)_ is a framework that reduce the boilerplate code for this translation layer. E.g. Hibernate and ActiveRecord.
+- Drawbacks of ORMs:
+  - Complex, and can't completely hide differences, leaving a lot of work still for devs.
+  - Generally used only for OLTP app development.
+  - ORMs usually only work with relational OLTP dbs, lacking support for search engines, graph databases, and NoSQL systems.
+  - Customizing the ORM's schema and query generation can be complex and negative.
+  - ORMs make it easy to accidentally write inefficient queries, like a N+1 query problem.
+- Benefits:
+  - Reduces boilerplate code, even if complicated queries need to be handled outside the ORM
+  - Caching features
+  - Help with managing schema migrations
+
+#### The document data model for one-to-many relationships
+- JSON representation has better _locality_, i.e. fewer queries/joins needed.
+- Best for actual _one-to-few_ relationships, where there is not massive branching.
+
 ### Normalization, Denormalization, and Joins
+- _Normalization_ is storing data as an ID which links to some other centralized data: ID will be used everywhere while the data stays just in one location / one copy.
+- Benefits of normalization: consistent style/spelling, unambiguity, ease of updating, localization support, search functionality.
+- Downside to normalization: extra lookup(s) required, less human readable.
+
+#### Trade-offs of normalization
+- Normalized data is faster to write but slower to query. Denormalized data is faster to query but much more expensive to write (usually).
+- Not all databases offer atomicity across multiple documents
+- Normalization usually better for OLTP systems, denormalization better for analytical systems (since read queries is the main concern).
+- Normalization also better for small to moderate systems, but for very large systems joins become problematic.
+- Denormalization is also difficult if the data changes often (like likes/comments on a post that has been denormalized into a timeline)
+
 ### Many-to-One and Manny-to-Many Relationships
+
 ### Stars and Snowflakes: Schemas for Analytics
+
 ### When to Use Which Model
+
 ## Graph-Like Data Models
+
 ### Property Graphs
+
 ### The Cypher Query Language
+
 ### Graph Queries in SQL
+
 ### Triple Stores and SPARQL
+
 ### Datalog: Recursive Relational Queries
+
 ### GraphQL
+
 ## Event Sourcing and CQRS
+
 ## DataFrames, Matrices, and Arrays
 
 # Chapter 4: Storage and Retrieval
-
 # Chapter 5: Encoding and Evolution
-
 # Chapter 6: Replication
-
 # Chapter 7: Sharding
-
 # Chapter 8: Transactions
-
 # Chapter 9: The Trouble with Distributed Systems
-
 # Chapter 10: Consistency and Consensus
-
 # Chapter 11: Batch Processing
-
 # Chapter 12: Stream Processing
-
 # Chapter 13: A Philosophy of Streaming Systems
-
 # Chapter 14: Doing the Right Thing
