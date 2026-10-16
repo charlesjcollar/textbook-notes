@@ -241,16 +241,49 @@
   - More likely, costs grow faster than linearly.
 
 ### Shared-Memory, Shared-Disk, and Shared-Nothing Architectures
+- Can _vertical scale_ get a faster machine with more CPU cores, more RAM, and more disk space.
+- Increasing parallelism on a single machine is called a _shared-memory architecture_ since it uses the same RAM.
+  - The cost here grows faster than linearly!
+- _Shared-disk architecture_ is several machines (each with their own RAM) that share disks, connected via some fast network.
+  - Contention adn overhead of locking limit scalability
+- _Shared-nothing architecture_ aka _horizontal scaling_ aka _scaling out_ where each machine has its own CPU, RAM, and disks. Coordination is done at the software level. Pros are:
+  - It can scale linearly.
+  - It can use any hardware, (cheaper price perhaps).
+  - It can easier scale up and down (just increase number of machines).
+  - Better fault tolerance by distributing geographically.
+- Downsides of shared-nothing architectures are complexity and requiring explicit sharding
 
 ### Principles for Scalability
+- Scaling architecture is very dependent on the specific application, no one-size-fits-all.
+- Likely necessary to rethink architecture ever order of magnitude, usually best to not plan one order of magnitude in advance.
+- Good idea generally to break a system into smaller components (microservices, sharding, stream processing, etc), with the challenge being knowing where to draw the line
+- Also, keep it simple when possible.
 
 ## Maintainability
+- The majority of cost in software is in its ongoing maintenance: bugs, operations, investigations, adapting to platforms, new features, tech debt.
+- Maintenance can be complex: outdated tech, knowledge loss with people leaving, fixing others' mistakes.
+- Try to design software with maintenance in mind, and it'll lower costs in the long run.
 
 ### Operability: Making Life Easy for Operations
+- Good software cannot run reliably with bad operations.
+- Manual operations will always be necessary, automation will never cover every case.
+- Can have too much automation: can be harder to troubleshoot if it goes wrong.
+- Can help operations by:
+  - Having monitoring tools
+  - Avoid dependency on individual machines
+  - Documentation
+  - Good default behavior, and allowing overrides
+  - Self-healing (when appropriate),
+  - Predictable behavior
 
 ### Simplicity: Managing Complexity
+- Rather subjective
+- _Essential complexity_ is inherent to the domain/problem, _accidental complexity_ arises because of limitations of the tooling.
+- Abstraction is the best tool we have against complexity.
 
 ### Evolvability: Making Change Easy
+- Adaptibility is closely linked to simplicity and abstractions. Loosely coupled systems are easier to modify.
+- Irreversibility is difficult (e.g. migrating from one database to another). Minimizing irreversibility improves flexibility.
 
 # Chapter 3: Data Models and Query Languages
 ## Relational vs Document Models
