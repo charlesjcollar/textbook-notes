@@ -330,20 +330,144 @@
 - Denormalization is also difficult if the data changes often (like likes/comments on a post that has been denormalized into a timeline)
 
 ### Many-to-One and Manny-to-Many Relationships
+- Usually represented with an _associative table_ or _join table_, which has a record for each connection.
+- Many-to-one and many-to-many relationships don't work well in the Document model.
 
 ### Stars and Snowflakes: Schemas for Analytics
+- A _star schema_ has a "center" _fact table_ where each "fact" represents an event. Each fact then has foreign keys to other _dimension tables_. Values in the fact record should only be values unique to that event.
+- A _snowflake schema_ is still a star schema, but broken down even further (a dimension table is normalized). Star schemas are easier to work with usually but larger (less normalized).
+- These schemas consist of mostly many-to-one relationships.
+- The schema can be further denormalized and have no dimension tables (i.e. precomputing joins), known as _one big table (OBT)_. More space required, but sometimes faster queries.
+- Denormalization is easier in analytics because the data is a log and not going to be overwritten.
 
 ### When to Use Which Model
+- In favor of document model: schema flexibility, locality performance increases, more close to the application's object model (sometimes).
+- In favor of relationship model: better support for joins, many-to-one, and many-to-many relationships.
+- Easier to reference "nested" items in a relationship model.
+- If a record has an ordered list of nested items, sometimes document model is easier for that (possible in relationship model, but a little more complicated).
+
+#### Schema flexibility in the document model
+- Document model can be thought of as _schema on read_ where schema has to be enforced upon reading a record.
+- Relationship model can be thought of as _schema on write_ where schema is enforced upon writing to the db.
+- When modifying a schema, its easier for document model, but the application code will have to support previous versions. For the relationship model, a migration is needed, which is normally easy but can be slow on large tables, sometimes requiring a lot of copying.
+  - E.g. splitting a column, instead of having a migration do it (and update every record at migration time), could have a write-on-read in code.
+- Schemaless is best if documents don't have the same structure
+
+#### Data locality for reads and writes
+- If typically need to load an entire document (with nested items), locality can make a big difference.
+- Locality is a burden if writing is common **and** documents are large.
+- SOme relational dbs offer the same, like Google's Spanner, allowing the schema to declare that a table's rows should be interleaved (nested) within a parent table. Oracle has the same with "multi-table index cluster tables". "wide-column" data model in Google's Bigtable. "column families" in HBase and Accumulo.
+
+#### Convergence of document and relational databases
+- They've converged over time: relational dbs adding JSON types and query operators and the ability to index properties inside documents. Document dbs add support for joins, secondary indexes, and declarative query languages.
 
 ## Graph-Like Data Models
+- Can be better if data has many many-to-many relationships.
+- A _node_, _entity_, or _vertice_ is a record like we'd think of in a relational/document db.
+- An _edge_, _relationship_, or _arc_ is a connection between nodes/entities/vertices.
 
 ### Property Graphs
+- A vertex contains: 
+  - an ID
+  - a label (to describe the type of object)
+  - a **set of outgoing edges**
+  - a **set of incoming edges**
+  - Some collection of properties
+- An edge contains:
+  - an ID
+  - starting vertex (_tail vertex_)
+  - ending vertex (_head vertex_)
+  - label to describe the kind of relationship
+  - Some collection of properties
+- Aspects of this model:
+  - Any vertex can have an edge with any other vertex, no restrictions
+  - Easy to find both incoming and outgoing edges and thus traverse the graph both forward and backward
+  - Using labels we can store different kinds of vertices and different kinds of relationships in a single graph and maintain a clean model.
+- This allows for quite a lot of flexibility in data modeling, and unlimited extensibility (add more facts/relationships).
 
 ### The Cypher Query Language
+- Supported by Memgraph, KùzuDB, Amazon Neptune, Apache AGE (with storeage in PostgreSQL).
+- Each vertex has a symbolic name (id), e.g. `usa` or `idaho`,.
+- Vertices look like `(idaho :Location {name:'Idaho', type:'state'})` (label is Idaho, has 2-field property set).
+- Edges use arrow notation like `(idaho) -[:WITHIN] -> (usa)` (edge has label of WITHIN).
+- E.g. how to find people who emigrated from the US to Europe:
+```
+MATCH
+  (person) -[:BORN_IN]->  () -[:WITHIN*0..]-> (:Location {name:'United States'}),
+  (person) -[:LIVES_IN]-> () -[:WITHIN*0..]-> (:Location {name:'Europe'})
+RETURN person.name
+```
+  - `MATCH` says "find all vertices that meet all of the below requirements"
+  - Person that is BORN_IN any vertex `()` that connects via any number of `WITHIN` edges (zero to infinity) to some vertex labeled "Location" with property `name:'United States'` (and lives in "Europe").
+  - For all matching vertices, return the `person.name`.
 
 ### Graph Queries in SQL
+- In theory could query the same way with SQL in a relational database, but usually relational DB queries know which joins are needed (and how many), whereas graph querying excels when the number of edges/joins is not fixed/known in advance.
+- Can be done in SQL with the `WITH RECURSIVE` syntax, e.g.
+```SQL
+WITH RECURSIVE
+  in_usa(vertex_id) AS (
+      SELECT vertex_id FROM vertices
+        WHERE label = 'Location' AND properties->>'name' = 'United States'
+    UNION
+      SELECT edges.tail_vertex FROM edges
+        JOIN in_usa ON edges.head_vertex = in_usa.vertex_id
+        WHERE edges.label = 'within'
+  ),
+
+  in_europe(vertex_id) AS (
+      SELECT vertex_id FROM vertices
+        WHERE label = 'location' AND properties->>'name' = 'Europe'
+    UNION
+      SELECT edges.tail_vertex FROM edges
+        JOIN in_europe ON edges.head_vertex = in_europe.vertex_id
+        WHERE edges.label = 'within'
+  ),
+
+  born_in_usa(vertex_id) AS (
+    SELECT edges.tail_vertex FROM edges
+      JOIN in_usa ON edges.head_vertex = in_usa.vertex_id
+      WHERE edges.label = 'born_in'
+  ),
+
+  lives_in_europe(vertex_id) AS (
+    SELECT edges.tail_vertex FROM edges
+      JOIN in_europe ON edges.head_vertex = in_europe.vertex_id
+      WHERE edges.label = 'lives_in'
+  )
+SELECT vertices.properties->>'name'
+FROM vertices
+JOIN born_in_usa     ON vertices.vertex_id = born_in_usa.vertex.id
+JOIN lives_in_europe ON vertices.vertex_id = lives_in_europe.vertex_id;
+```
+- The `in_usa` first finds the `vertex_id` of the record that has property `'name' = 'United States'`, then selects/unions recursively on outgoing edges (places in the US) to come up with a list of **all** the locations within the US.
+- Does the same for Europe.
+- The `born_in_usa` then gets the set of `vertex_id`s for all people `born_in` the set of vertices from `in_usa`.
+- Does the same for Europe, but with `lives_in`.
+- Then finally, with all people `born_in_usa` and all people `lives_in_europe`, select the name of vertices that inner join on both.
+- So... way more complicated with SQL.
+- The Graph Query Language (GQL) ISO standard, based on Cypher is not yet widely adopted but hopefully will bring greater uniformity in coming years.
 
 ### Triple Stores and SPARQL
+- A record has 3 pieces of information, very similar to the property graph model: `subject`, `predicate`, `object` (i.e. `tail_vertex_id`, `relationship_label`, `head_vertex_id`).
+- The `subject` is always a vertex in a graph, the `object` can be another vertex, or a primitive datatype.
+  - If a primitive datatype, basically then like the property set in a vertex in the property graph model.
+- Can be expressed in the _Turtle_ language (a subset of _Notation3 (N3)_). (Not covered here).
+- The Turtle language encodes data in a model called the _Resource Description Framework_. (Not covered here).
+
+#### The SPARQL query language
+- Pronounced "sparkle".
+- Same example as above looks like:
+```SPARQL
+PREFIX : <urn:example:>
+
+SELECT ?personName WHERE {
+  ?person :name ? personName.
+  ?person :bornIn / :within* / :name "United States".
+  ?person :livesIn / :within* / :name "Europe".
+}
+```
+- SPARQL is supported by Amazon Neptune, AllegroGraph, Blazegraph, OpenLink Virtuoso, Apache Jena, and other triple stores.
 
 ### Datalog: Recursive Relational Queries
 
