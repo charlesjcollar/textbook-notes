@@ -470,14 +470,76 @@ SELECT ?personName WHERE {
 - SPARQL is supported by Amazon Neptune, AllegroGraph, Blazegraph, OpenLink Virtuoso, Apache Jena, and other triple stores.
 
 ### Datalog: Recursive Relational Queries
+- Each _fact_ corresponds to a row in a relational table: `table(val1, val2, ...)`, e.g `location(1, "North America", "continent")` which says North America is a location and it's a continent.
+- Edges are basically 2-column join tables that would link ids, e.g. `within(2, 1)` which would say location 2 is within location 1.
+- It's graph representation in a relational database.
+- Not going into syntax of the Datalog language here: build virtual tables (views) that can be then queried.
 
 ### GraphQL
+- Not the same as other graph languages
+- It's intended for OLTP queries.
+- Best when queries change rapidly: you don't need to change server-side APIs.
+- Tooling needed to convert GraphQL queries to requests to internal services come at a cost.
+- Authorization and rate limiting can also be challenging (again breaking up a query to several upstream resources).
+- Recursion is not allowed in the language.
+- Arbitrary search conditions not allowed.
+- Advantages are the server doesn't need to know what the UI needs, it just offers various attributes. UI can select whatever.
 
 ## Event Sourcing and CQRS
+- _Event sourcing_ is using events as the source of truth, and every state change is an "event".
+- As events come in and are stored as a log, different materialized views can be updated from them, to be used for different purposes.
+- Separating read-optimized representations that are derived from write-optimized representations is called _command query responsibility segregation (CQRS)_.
+- If modeling in this senes, use past tense words/verbs.
+- Advantages of CQRS:
+  - Easier to debug why something happened (read the log, derive the view updates).
+  - Materialized views can be recomputed.
+  - Materialized views can be super flexible and built exactly for the read queries.
+  - High write throughput.
+- "Undoing" an event is done by writing a "deletion" event.
+- Downsides of CQRS:
+  - Be careful if external information that changes often  can change a value, e.g. a currency exchange rate.
+  - GDPR / proper deletion becomes difficult and requires extra work.
+  - Visible side effects from processing are unwanted upon re-processing for whatever reason (e.g. confirmation emails).
+- Can be implemented on top of any databases, but EventStoreDB, MartenDB, and Axon Framework are built for this. Also message brokers like Kafka.
+- Event storage systems must guarantee order, which can be difficult.
 
 ## DataFrames, Matrices, and Arrays
+- A _DataFrame_ supports relational-like operators that perform **bulk** operations, like applying a function to all rows, filtering all rows, etc.
+- DataFrame differs from SQL in that it manipulates data through commands; i.e. it describes **how** data should be found/manipulated (not declarative). Manipulations take place usually on local copies of data.
+- Commonly used to transform data into matrices (e.g. counting things), which can then be fed into ML algorithms.
 
 # Chapter 4: Storage and Retrieval
+
+## Storage and Indexing for OLTP
+
+### Log Structured Storage
+
+### B-Trees
+
+### Comparing B-Trees and LSM-Trees
+
+### Multicolumn and Secondary Indexes
+
+### Storing Values Within the Index
+
+### Keeping Everything in Memory
+
+## Data Storage for Analytics
+
+### Cloud Data Warehouses
+
+### Column-Oriented Storage
+
+### Query Execution: Compilation and Vectorization
+
+### Materialized Views and Data Cubes
+
+## Multidimensional and Full-Text Indexes
+
+### Full-Text Search
+
+### Vector Embeddings
+
 # Chapter 5: Encoding and Evolution
 # Chapter 6: Replication
 # Chapter 7: Sharding
