@@ -509,26 +509,145 @@ SELECT ?personName WHERE {
 - Commonly used to transform data into matrices (e.g. counting things), which can then be fed into ML algorithms.
 
 # Chapter 4: Storage and Retrieval
+- A database fundamentally is something that enables reads and writes of data.
+- Main two OLTP storage engines are log-structured and B-trees.
 
 ## Storage and Indexing for OLTP
+- A simple log has pretty good performance for simple cases, and a great `write` performance, but a `get` function has poor performance `O(n)`.
+- An index is needed for efficient lookups
+- An index is a derived data structure, aka an _additional_ structure.
+- Indexes induce overhead on write (they may need to update the index).
 
 ### Log Structured Storage
+- Start by assuming there's an in-memory hash map of [key, byte_offset], where the offset is where in the file on disk the record starts.
+- Problems with this right away is that nothing ever overwrites (i.e. will run out of disk space), an in-memory hash map takes a while to rebuild on restart, and range queries are difficult/impossible.
+
+#### The SSTable file format
+- Better to have data sorted.
+- For an _Sorted Strings Table (SSTable)_, a tree of sorted key-offset blocks allow quick lookup. A few high-level blocks of a few kilobytes are in memory and point to other blocks.
+- Blocks can also be compressed to save disk space and I/O bandwidth at the cost of a it more CPU time.
+
+#### Constructing and merging SSTables
+- Writing is harder than just a log. Use a _log-structured_ approach:
+  1. Write comes in, add to an in-memory ordered map structure, called a _memtable_. Reads and writes are quick.
+  2. When the memtable gets bigger than a certain threshold (usualy a few megabytes), write out to disk in a sorted order as an SSTable file, called a _segment_. Each segment has its own index.
+  3. When reading a value, first try to find in memtable, then most recent segment, then next oldest, etc.
+  4. A background merging/compaction process happens to combine segments and overwrite values.
+- Merging usually works like the mergesort algorithm (to combine blocks in `O(n)` time).
+- Storage engine also keeps a separate log on disk to which every write is immediately applied, thus ensuring durability (can rebuild database from log). Once the memtable is written to memory, the log piece can be discarded.
+- To delete a key and its associated value, append a _tombstone_ record, which will actually delete upon merging.
+- This above algorithm is used in RocksDB, Cassandra, ScyllaDB, and HBase, all inspired by Google's Bigtable, and is called _Log-Structured Merge-tree (LSM-tree)_.
+- Sorage engines working like this are called _LSM storage engines_.
+- Segment files don't have to be on a local disk, it works well for object storage.
+
+#### Bloom filters
+- LSM storage can have slow reads on old keys and nonexistent keys (reads the whole db!)
+- Use a bloom filter:
+  - Hash a key -> an "index of bits" (e.g. 1024 bits).
+  - The bloom filter is an in-memory "index of bits" of the same length. For each added key, OR its hash onto the bloom filter.
+  - When querying to see if a key exists, hash that value, and if any of the bits in its "index of bits" are 0 on the bloom filter, the key definitely does not exist.
+  - Never has false negatives (says a key doesn't exist when it does), will have false positives (says a key exists when it doesn't).
+- Have a bloom filter for each segment: scan can skip the segment if it definitely doesn't exist.
+
+#### Compaction strategies
+- Size-tiered compaction: newer and smaller segments merge into older and larger segments. Better for handling high write throughput since data is rewritten only a few times in larger sequential merges.
+- Leveled compaction: Keep segment sizes fixed and group them into increasing "levels" (L0, L1, etc.). All segments in levels beyond L0 are range-partitioned. More efficient for reads because fewer segments are needed to be checked.
+- Writing to a small number of keys frequently also works better with leveled compaction.
 
 ### B-Trees
+- Most widely used structure for reading and writing database records.
+- B-trees break the database into fixed-size _blocks_ or _pages_ and may **overwrite a page in place**.
+- Pages can refer to each other, creating a tree of "pointers".
+- Similar to SSTables in that B-trees keep key-value pairs sorted by key (for quick lookups and range queries).
+- _Branching factor_ is the number of references to child pages in one page of the B tree, usually several hundred.
+- To overwrite, find the value (normal search) and write in place. 
+- To add a new key, find the page whose range encompasses that key and add it to that page.
+  - If not enough room on the page, the page is split into two half-full pages, and the parent page is updated.
+- Deleting keys is complex....
+- Most databases can fit into a B-tree of 3 or 4 levels deep (a 4-level tree of 4 kilobytes pages with a branching factor of 500 can store 250 terabytes.)
+
+#### Making B-trees reliable
+- Overwriting several pages at once (e.g. page split) is a dangerous operation, since it's a multi-step process.
+- Common to include a _write-ahead log (WAL)_ which all writes are appended to before applying writes to pages themselves. This can help restore after a crash.
+- Implementations of the B-tree usually write to pages in memory for a while first, then it is flushed to disk with an `fsync` call.
+
+#### Using B-tree variants
+- Can write a modified page to a new location, and a new version of the parent pages are created too, pointing to the new location. Good for concurrency control.
+- Higher-level pages can abbreviate keys -> more keys per page -> higher branching factor -> fewer levels.
+- Using additional pointers, like leaf pages pointing to previous and subsequent leaf pages.
 
 ### Comparing B-Trees and LSM-Trees
+- In general: LSM-trees are better for write-heavy applications, B-trees are faster for reads.
+- Some storage engines pull ideas from both (like merging B-trees LSM-style).
+
+#### Read performance
+- B-trees are fast; LSM does have to check several SSTables, but bloom filters help.
+- Range queries on B-trees are simple and fast, using the sorted structure. For LSM storage, SSTables are sorted but all segments need to be scanned in parallel, and bloom filters don't help.
+- High write throughput can cause latency spikes on LSM if memtable fills up (writes occuring faster than data can be written to disk). Backpressure is often applied, suspending **all reads and writes** until memtable is written out.
+- Modern SSDs can perform many indepenent read requests in parallel. LSM-trees and B-trees can provide high read throughput if they take advantage of this parallelism.
+
+#### Sequential versus random writes
+- Many small scattered writes -> randomly scattered disk operations on many pages for B-trees. This will have a lower throughput than LSM-trees because LSM-trees always write to the same place (memtable), and compaction is localized too.
+  - This is a smaller difference on SSDs, but there's still a difference (not going into it here).
+
+#### Write amplification
+- Total bytes written to disk (during log writes, memtable writes, or page writes, page updates, etc.) / actual number of bytes writing just to a log = _write amplification_.
+- Write amplification becomes a bottleneck in write-heavy applications because the database can only write to disk so fast.
+- It's a problem in both LSM-trees and B-trees. **For typical workloads, LSM-trees tend to have lower write amplifications.**
+  - Lower write amplification also wears SSDs slower.
+
+#### Disk space usage
+- B-trees can become fragmented over time, and storage engines need a background process that moves pages aroun to place them better.
+- Fragmentation is less of a problem in LSM-trees.
+- Multiple copies of data on disk is harder to delete (e.g. GDPR)
+- LSM tables are good for taking snapshots of databases at a point in time: write out memtable and record which segment files existed at that time. If files that are part of the snapshot are not deleted, don't even need to copy them.
+  - Snapshots are harder on B-trees.
 
 ### Multicolumn and Secondary Indexes
+- Indexed values are not necessarily unique on a secondary index, unlike a primary index. Can solve doing either:
+  - Making each index key a list of matching rows.
+  - Making them unique by appending some row identifier to it.
 
 ### Storing Values Within the Index
+- If actual data is stored directly within the index structure, called a _clustered index_.
+- Value can be just a reference to the row in the primary index or a direct reference to disk location.
+- Also a middle ground called a _covering idnex_ or _index with included columns_ which store only some of the columns within the index. Some queries are faster, but duplication of data slows writes and uses more disk space.
+- Data not stored in an index is in a _heap file_ and is stored in no particular order.
+- Updating a value without changing a key is easy with a heap file if the new value isn't larger than the old value. If larger, it probably needs to move to a new location where there's enough space -> updating all indexes OR leaving behind a forwarding pointer.
 
 ### Keeping Everything in Memory
+- Some in-memory key-value stores like Memcached are intended for caching only, and data loss is acceptable on restart.
+- Durability is possible with special hardware, or more commonly, writing log of changes to disk, or periodic snapshots to disk, or replicating in-memory state to other machines.
+- Lose some operational advantages of keeping everything in memory: easy backups, inspections, analyzing by external utilities.
+- VoltDB, SingleStore, and Oracle TimesTen are in-memory with a relational model.
+- RAMCloud is an in-memory key-value store with durability (log-structured approach both for data in memory and on disk.)
+- Redis and Couchbase provide weak durability by writing to disk asynchronously.
+- In-memory databases are faster becuase they avoid overheads of encoding in-memory data structures to a form that can be written to disk. Nothing to do with memory vs disk reading.
+- In-memory databases can provide data models hard to implement with disk-based indexes, like Redis offering priority queues and sets.
 
 ## Data Storage for Analytics
+- Often relational. Looks similar to OLTP databases because they have SQL query interface.
+- Most database vendors support either OLTP or OLAP but not both. Even the hybrid ones (Microsoft SQL Server, SAP HANA, SingleStore) have two separate storage and query engines that are just accessible through a common SQL interface.
 
 ### Cloud Data Warehouses
+- Established vendors offering on-premise deployments and cloud-based solutions: Teradata, Vertica, SAP HANA.
+- Cloud-only warehouses: GCP BigQuery, Amazon Redshift, Snowflake
+- Cloud-only warehouses can better utilize scalable cloud infrastructure (e.g. object storage, serverless).
+- Cloud-only warehouses can have better integration with other cloud services, and can be more elastic since computation is fully decoupled from the storage layer.
+- Open source data warehouses have evolved with the cloud too (Apache Hive, Trino, Apache Spark), in the sense that they are "breaking apart" and implemented as separate components.
+- Separate components of a Data Warehouse:
+  - **Query engine**: E.g. Trino, Apache DataFusion, Presto. Queries -> execution plans -> executing distributed tasks in parallel. Some provide built-in task execution, but some use third party frameworks like Spark or Flink.
+  - **Storage format**: how data is encoded and stored in object storage or a dsitributed file system. Data can be accessed by the query engine as well as other applications. E.g. Parquet, ORC, Lance, Nimble.
+  - **Table format**: files written normally are immutable; to spuport inserts and deletes, a table format like Apache Iceberg or Databrick's Delta is needed. Specify a file format which constitute a table and its schema. Can provide advanced features like querying the table at a certain point in time, garbage collection, and transactions.
+  - **Data catalog**: Specifies which tables are in a database. Can be queried by a REST interface, or used by query engines. Decoupling the catalog from the query engine enables data discover and governance. Apache Iceberg, Snowflake's Polaris, Databrick's Unity Catalog.
 
 ### Column-Oriented Storage
+
+#### Column compression
+
+#### Sort order in column storage
+
+#### Writing to column-oriented storage
 
 ### Query Execution: Compilation and Vectorization
 
@@ -550,3 +669,9 @@ SELECT ?personName WHERE {
 # Chapter 12: Stream Processing
 # Chapter 13: A Philosophy of Streaming Systems
 # Chapter 14: Doing the Right Thing
+
+- Maintained and expanded distributed, message-driven, cash transfering software that handles up to 20 million messages, 1.2 million transfers, and 2 billion dollars a day.
+- Designed, implemented, and managed a RabbitMQ migration with 100% uptime (modified blue-green deployment) to increase durability and consistency, and to remove roadblocks for a major version upgrade.
+- Designed and led the implementation of several new cash transfering rails to enable tokenization of securities, crypto partnerships, and Real Time Payments.
+- Led a subteam with two other engineers, setting up and integrating a MongoDB full-text search engine to speed up queries 99th percentile queries from over 2 minutes to under 15 seconds.
+- Participated in and helped improve support, monitoring, on call, agile practices, and releasing workflows.
