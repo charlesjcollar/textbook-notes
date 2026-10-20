@@ -691,9 +691,24 @@ SELECT ?personName WHERE {
   - Can be used for more than just geospatial data.
 
 ### Full-Text Search
-
+- Use an _inverted index_ which is a key-value structure where the key is the term and the value is the list of IDs of all documents that contain the term, called the _postings list_.
+- If the document IDs are sequential numbers, the postings list can be a sparse bitmap. 
+- Used by Lucene (in Elasticsearch and Solr). Also GIN index type in PostgreSQL can support full-text search and indexing inside JSON documents.
+- The terms in the index can be substrings of length `n`, called _n-grams_, e.g. a trigram of string "hello" are "hel", "ell", and "llo". Enables regex expressions in search queries, but indexes are quite large.
+- Lucene can search for text with a certain edit distance.
 
 ### Vector Embeddings
+- _Semantic search_ tries to understand document concepts adn user intentions, to search on the semantics (meaning) of something.
+- Semantic search indexes use _vector embedding_ which translates a text document into a vector of floating-point values, a point in some multi-dimensional space. If inputs are similar, they should generate vector embeddings near each other in space.
+- Embedding models use large vectors (often over 1000)
+- Models are usually implemented as neural networks.
+- Early models are Word2Vec, BERT, and GPT.
+- A semantic search engine generates a vector of a query + related context (like location), then finds documents with similar vector embeddings.
+- We find similar vector embeddings with a vector index:
+  - **Flat indexes**: vectors are stored as they are. Accurate, but slow
+  - **Inverted file (IVF) indexes**: Vector space is partioned (into _centroids_) to reduce the number of vectors to be compared to. Faster, but some close documents can be missed if the query falls into a different partition. A query first defines _probes_, the number of partitions to check. More probles -> more accurate but slower
+  - **Hierarchical Navigable Small World (HNSW) indexes**: multiple layers of the vector space. Find nearest vector in the top space (few vectors), then goes to the same node in the next layer down and finds the best nearby vector (reducing the number of vectors searched to just nearbby), and repeat. Again, are only approximate
+  - Facebook's Faiss and PostgreSQL's pgvector support both IVF and HNSW.
 
 # Chapter 5: Encoding and Evolution
 # Chapter 6: Replication
