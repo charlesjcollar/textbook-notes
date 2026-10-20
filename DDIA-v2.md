@@ -642,20 +642,56 @@ SELECT ?personName WHERE {
   - **Data catalog**: Specifies which tables are in a database. Can be queried by a REST interface, or used by query engines. Decoupling the catalog from the query engine enables data discover and governance. Apache Iceberg, Snowflake's Polaris, Databrick's Unity Catalog.
 
 ### Column-Oriented Storage
+- Dimension tables are usually much smaller (millions of rows) than fact tables (trillions of rows).
+- Fact tables can be hundreds of columns wide, but a query usually accesses only 4-5 of them at once.
+- Storing columns together in files instead of rows, means a query only needs to scan 5 out of hundreds of files.
+- In practice, don't actually store entire columns in one file, but broken into blocks, usually by date range (since most queries are date range.)
 
 #### Column compression
+- Column storage leads well to compression, if there's a lot of repetition.
+- Create bitmap rows for the possible values, then can do run-length encoding to compress even further.
+- Works well for cases like `WHERE product_sk IN (31, 68, 69)`: do a bitwise OR on the three bitmaps of `product_sk`.
+  - Can do this on bitmaps between columns too, like `WHERE product_sk = 30 AND store_sk = 3`, bitmap OR of the two.
 
 #### Sort order in column storage
+- Sort order doesn't necessarily matter, easiest to just store them in order they were inserted (appending).
+- Admin needs to specify which columns to sort by, all columns will be sorted.
+- An advantage of sorted is better compression if like-values are sorted together (really just best on first key and second sorted columns).
 
 #### Writing to column-oriented storage
+- Writes are usually from bulk imports, often via an ETL process.
+- Writing individual rows is very inefficient (due to the compression).
+- Use a log-structured approach: write to a row-oriented, sorted, in-memory store, then merge with column-encoded files and write new files in bulk. Old files remain immutable.
+- Queries that need both old data (column) and new data (in memory) combine results of two queries, one on column files and the other on the memory store. This implementation is nicely hidden from the user. Done by Snowflake, Vertica, Apache Pinot, Apache Druid, and many others.
 
 ### Query Execution: Compilation and Vectorization
+- Analytical queries are broken down into a _query plan_ usually of multiple stages (_operators_), then ran distributed and in parallel on multiple machines.
+- Approaches for efficient query execution:
+  - **Query compilation**: code is generated for executing the query. Iterate over rows one by one, analyze values and perform calculations, and push data to an output buffer (for some rows). Generated code -> machine code, which is run on column-encoded data loaded into memory of the machine.
+  - **Vectorized processing**: Query is interpreted (not compiled). Made fast by processing many values from a column in a batch. Database will have predefined operators, which we can pass arguments to and get back a batch of results. E.g., getting back bitmaps of values in columns, then doing our own operation on them (like bitwise AND).
+- These two are different but both used in practice.
+- Good performance can be achieved due to:
+  - Preferring sequential memory over random access.
+  - Most work done in tight inner loops.
+  - Making use of parallelism.
+  - Operating directly on compressed data without decoding it.
 
 ### Materialized Views and Data Cubes
+- A materialized view is an actual copy of the query results written to disk.
+- A virtual view is a shortcut for writing queries (SQL engine will expand the query and then process it).
+- Materialized views need to be updated when data changes. Means more work on writes in order to improve reads.
+- _Materialized aggregates_ are a materialized view that basically cache some counts/sums queries use most often.
+- A _data cube_ or _OLAP cube_ is a grid of aggregates grouped by different dimensions. This grid can also then have additional aggregates pre-computed.
+- Some queries can become very fast with this precomputation.
+- Disadvantage is less flexibility than querying raw data. Data cubes are only used as a performance boost for certain queries.
 
 ## Multidimensional and Full-Text Indexes
+- Most common multicolumn index is a _concatenated index_ which simply appends several fields into one key. Good only if sorting / range searching on the first item in the key.
+- _Multidimensional indexes_ allow querying several columns at once. Particularly good for geospatial data. Use R-trees or Bkd-trees which divide up space so nearby data points are grouped in the same subtree.
+  - Can be used for more than just geospatial data.
 
 ### Full-Text Search
+
 
 ### Vector Embeddings
 
