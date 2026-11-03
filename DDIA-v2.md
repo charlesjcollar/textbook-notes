@@ -700,17 +700,146 @@ SELECT ?personName WHERE {
 ### Vector Embeddings
 - _Semantic search_ tries to understand document concepts adn user intentions, to search on the semantics (meaning) of something.
 - Semantic search indexes use _vector embedding_ which translates a text document into a vector of floating-point values, a point in some multi-dimensional space. If inputs are similar, they should generate vector embeddings near each other in space.
-- Embedding models use large vectors (often over 1000)
+- Embedding models use large vectors (often over 1000).
 - Models are usually implemented as neural networks.
 - Early models are Word2Vec, BERT, and GPT.
 - A semantic search engine generates a vector of a query + related context (like location), then finds documents with similar vector embeddings.
 - We find similar vector embeddings with a vector index:
-  - **Flat indexes**: vectors are stored as they are. Accurate, but slow
-  - **Inverted file (IVF) indexes**: Vector space is partioned (into _centroids_) to reduce the number of vectors to be compared to. Faster, but some close documents can be missed if the query falls into a different partition. A query first defines _probes_, the number of partitions to check. More probles -> more accurate but slower
+  - **Flat indexes**: vectors are stored as they are. Accurate, but slow.
+  - **Inverted file (IVF) indexes**: Vector space is partioned (into _centroids_) to reduce the number of vectors to be compared to. Faster, but some close documents can be missed if the query falls into a different partition. A query first defines _probes_, the number of partitions to check. More probles -> more accurate but slower.
   - **Hierarchical Navigable Small World (HNSW) indexes**: multiple layers of the vector space. Find nearest vector in the top space (few vectors), then goes to the same node in the next layer down and finds the best nearby vector (reducing the number of vectors searched to just nearbby), and repeat. Again, are only approximate
   - Facebook's Faiss and PostgreSQL's pgvector support both IVF and HNSW.
 
 # Chapter 5: Encoding and Evolution
+- Data and schemas need to change over time.
+- Corresponding application code needs to change with the data.
+- New and old versions of code and data formats may need to coexist at the same time (during a rolling upgrade).
+- _Backward compatability_: Newer code can read data written by older code.
+- _Forward compatability_: Older code can read data written by newer code. (Often harder)
+- When older code updates data previously written by newer code, fields can be lost (e.g. during ORM mapping).
+
+## Formats for Encoding Data
+- Data structures in memory have pointers, unlike data written to disk, and are optimized for efficient access and manipulation.
+- There will need to be a translation, called _encoding_, _serialization_, or _marshaling_, with the reverse being _decoding_, _parsing_, _deserialization_, or _unmarshaling_.
+
+### Language-Specific Formats
+- Many programming languages have built-in support for encoding. But they have problems:
+  - Encoded data is tied to that programming language.
+  - Decoding means instantiating arbitrary classes. Security problem if an application decodes an arbitrary (injected) byte sequence.
+  - Versioning is often neglected/an afterthought.
+  - Poor performance or resulting encoding.
+- Best to **not** use built-in encoding except for very transient purposes.
+
+### JSON, XML, and Binary Variants
+- JSON, XML, and CSV are human-readable, and have various problems:
+  - Verbosity
+  - Ambiguity around numbers (integers vs floats, digits vs strings)
+  - Do not support binary strings, often done in base64
+  - CSV has no schema and escaping rules (commas, new line characters) not always implemented correctly
+- They are good for many purposes, often for data interchange between orgs.
+
+#### Json Schema
+- JSON Schema has standard primitive types (string, number, integer, object, array, boolean) and also separate validation specification for additional constraints, like a minimum and maximum value.
+- JSON Schemas can have open content models (any field not defined can exist with any datatype), or closed content models (only explicitly defined fields are allowed). Open is more common, so usually JSON Schemas define what **isn't** permitted.
+- JSON Schema is powerful but complexity can make for unwieldly definitions, making it difficult to resolve remote schemas, reason about conditional rules, or evolve schemas in a forward- or backward-compatible way.
+
+#### Binary encodings
+- There are binary encodings of JSON and XML to save space, but not widely adopted
+
+### Protocol Buffers
+- No field names like JSON, only _field tags_ which are simple numbers. If encoder and decoder have the same schema, field names can be derived easily from the field tag.
+
+#### Field tags and schema evolution
+- Protobuf has unchangeable field tags: a field tag cannot be changed, it can only be added or deprecated, not reused.
+- Can sometimes change field datatypes if truncation is carefully considered (e.g. 32-bit int to a 64-bit int).
+
+### Avro
+- No field tags like protocol buffers, (and no field names), just the values present, concatenated together. This means encoding and decoding must be done with the **exact same schema**.
+
+#### The writer's schema and the reader's schema
+- Writer can write with it's latest schema. Reader has to read with it's latest schema **and** the writer's schema. Reader can translate differences (drop nonexistent fields, add defaults to nonexistent fields).
+
+#### Schema evolution rules
+- Fields can only be added or removed if they have a default value.
+- Values can only be null if explicitly stated in the union type (e.g. `{null, string}`).
+- Changing a field datatype is possible if Avro can convert the type.
+- Changing a field's name is backward compatible but not forward compatible (reader's schema can contain aliases for field names).
+- Adding a branch to a union type is backward compatible but not forward compatible.
+
+#### But what is the writer's schema?
+- Must be sent to reader, so best done once to decode multiple records like:
+  - at the beginning of a large file,
+  - as a version number in database records (Confluent's schema registry for Apache Kafka and LinkedIn's Espresso)
+  - at the beginning of a bidirectional network connection.
+
+#### Dynamically generated schemas
+- Can just generate a schema when dumping a database table, which means any column changes get added upon the next dump.
+- Far more difficult with protocol buffers.
+
+## The Merits of Schemas
+- Binary encodings based on schemas have nice properties:
+  - Much more compact than "binary JSON".
+  - Schema is a valuable form of documentation that has to stay up to date.
+  - A database of schemas allows checking forward and backward compatability.
+  - Generating code from a schema is very useful and allows type checking at compile time.
+- Keep the number of concurrent schema formats to a minimum to keep operations simple.
+
+## Modes of Dataflow
+- How data flows, and who encodes and decodes data, means different approaches.
+
+### Dataflow Through Databases
+- Can think of storing something in a database as **sending a message to your future self**. Thus, **backwards compatibility is essential**.
+- Multiple processes may be writing and reading to a database at the same time that have different schema versions (e.g. during rolling deployment). Forward compatibility is often required.
+
+#### Different values written at different times
+- Data outlives code.
+- Can migrate all data to a new schema, but it's expensive. Usually only done for complex schema changes.
+- Simple schema changes can just have the database fill in default values for any missing values (e.g. `null`).
+
+#### Archival storage
+- Data dumps to a data warehouse will usually be encoded with the latest schema.
+- Avro is usually a good fit since data is written in one go and is immutable.
+
+### Dataflow Through Services: REST and RPC
+- Services are similar to databases: clients submit and query data. Main difference is services expose a much more limited API than just arbitrary queries.
+- Old and new versions of servers and clients may be running at the same time, so effort is needed to keep APIs compatible, especially in cross-domain connections.
+
+#### Web services
+- Service developers use an IDL (OpenAPI/Swagger, Protocol Buffers) to define and document API endpoints of a service and datamodels, and to evolve them over time.
+- Many server frameworks couple definitions and server code toegher, e.g. generating the IDL automatically from the code.
+  - Or vice versa like with gRPC, proto is written first, then service scaffolding is generated.
+
+#### The problems with remote procedure calls
+- A local function call is predictable and succeeds/fails obviously. It's hard to know if an RPC fails or if it's the network's fault. Related: timeouts.
+- A retry after a timeout could result in duplication if not idempotent.
+- Network delays.
+- Pointers are not passed as small values, but as fully encoded objects (which can be problematic if the objects are big).
+- Datatype translation between languages of server and client could result in weird bugs.
+- Point is, RPCs and local functions are **fundamentally different things** and should not be viewed as equal.
+
+#### Load balancers, service discovery, and service meshes
+- When communicating over a network, client must know the address of the service. Multiple parallel services + availability + scalability demands lead to more complex *service discovery* solutions.
+- **Hardware load balancers**: literal equipment in datacenters detect network failures and shift traffic when needed.
+- **Software load balancers (e.g. NGINX, HAProxy)**: similar to hardware load balancers
+- **The Domain Name Service (DNS)**: allows multiple IP addresses to be associated with a single domain. Propogation of changes is slower, so clients can see stale IP addresses.
+- **Service discovery systems**: Using a centralized registry like etcd or ZooKeeper. A new service instance registers itself with the service discovery system. The service discovery system maintains its registry with heartbeats to instances. The service discovery system gives endpoints directly to clients (not a proxy) + additional metadata to allow clients to make smarter load-balancing decisions.
+- **Service meshes**: Combination of load balancers and service discovery. Deployed as an in-process library (sidecar) on both client and server. These sidecars handle SSL certificates and TLS, and observability into the network.
+- Dynamic service environments are best with an orchestrator (e.g. K8) + service mesh. Specialized infrastructure like a database/messaging system can use their own purpose-built load balancers. Simple deployments are best with software load balancers.
+
+#### Data encoding and evolution for RPC
+- Can assume services will update before clients -> backward compatibility on requests, forward compatibility on responses.
+- Compatiblity may need to be maintained forever for cross-organization connections (cannot force someone else to upgrade).
+- For RESTful APIs, common to use a version number in the URL or `Accept` header, or within an API key.
+
+### Durable Execution and Workflows
+
+
+### Event-Driven Architectures
+
+#### Message brokers
+
+#### Distributed actor frameworks
+
 # Chapter 6: Replication
 # Chapter 7: Sharding
 # Chapter 8: Transactions
