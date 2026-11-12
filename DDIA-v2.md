@@ -832,13 +832,38 @@ SELECT ?personName WHERE {
 - For RESTful APIs, common to use a version number in the URL or `Accept` header, or within an API key.
 
 ### Durable Execution and Workflows
-
+- A sequence of steps is a _workflow_, each step a _task_. Usually a graph.
+- Workflows are run by a _workflow engine_, which determines when and which machines to run on, what to do on failure, parallelism, etc.
+- Workflow engines have an _orchestrator_ which schedules tasks, and an _executor_ which executes the tasks.
+- _Durable execution frameworks_ provide **exactly-once semantics** for workflows.
+  - If a task fails, it will be re-executed but will skip RPC calls or state changes that were done successfully before failure, simply pretending to make the call while returning the previous result. Done by writing all external work requests and responses to a write-ahead log.
+  - Nondeterministic code is problematic here; frameworks often provide deterministic implementations of such library functions and have static analysis tools to detect nondeterminism.
 
 ### Event-Driven Architectures
+- Sender doesn't wait for recipient to process events.
+- Messages go into a intermediary _message broker_ (or queue) which stores the message to be picked up by the recipient.
+- Advantages to RPC:
+  - Improves overloading and reliability by having buffers.
+  - Redelivery of messages (e.g. if crash) preventing message loss.
+  - Avoid service discovery by sender (done by broker system).
+  - Can fan out (send same message to several recipients).
+  - Decouples sender from recipient.
+- Naturally asynchronous, but can be made synchronous by having the sender wait for a response on a separate channel.
 
 #### Message brokers
+- Generally one of two message distribution patterns that a broker will follow:
+  - Add message to a queue, and only one consumer receives the message.
+  - Add message to a topic, broker delivers message to all subscribers (multiple subscribers receive the same message).
+- Brokers don't enforce a data model.
+- Brokers commit messages to disk if they haven't been read yet, but delete them after being consumed. Some brokers can be configured to store messages indefinitely (e.g. useful for event sourcing).
 
 #### Distributed actor frameworks
+- _Actor model_ is a programming model for concurrency in a single process. Logic is encapulsted in _actors_, with each actor representing one client or entity.
+- An actor maintains its own local state and can communicate with other actors by sending and receiving asynchronous messages.
+- Message delivery is not guaranteed, and actors need to be ready for that.
+- Actors process one message at a time, and don't worry about thread. Actors are scheduled independently by the framework.
+- _Distributed actor frameworks_ take this programming model and scale it across multiple nodes, using a message broker as the communication means.
+- When doing rolling upgrades, forward and backward compatibility must be considered.
 
 # Chapter 6: Replication
 # Chapter 7: Sharding
