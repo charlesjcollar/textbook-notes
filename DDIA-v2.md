@@ -866,8 +866,21 @@ SELECT ?personName WHERE {
 - When doing rolling upgrades, forward and backward compatibility must be considered.
 
 # Chapter 6: Replication
+- Main reasons for replication: geographically close to users, increasing availability, parallel reads -> higher read throughput
+- Difficulty with replication lies in the difficulty of handling changes to replicated data.
+
+#### Backups and Replication
+- Backups are useful in their own way because they have snapshots: can be used if accidental changes are made. Accidental changes propogate to replicas, probably quickly.
+- Backups are cheaper to keep in an object store since they should be used infrequently.
 
 ## Single-Leader Replication
+- A _replica_ has a copy of the database.
+- Most common solution is _leader-based_/_primary-backup_/_active/passive_ replication:
+  - One replica is the _leader_ (or _primary_ or _source_), which handles all writes, written to local storage first
+  - All other replicas are _followers_ (or _read replicas_, _secondaries_, or _hot standbys_), which receives messages from the leader upon data changes. These messages come as part of the _replication log_ or _change stream_ and must be applied in the same order
+  - Clients can read from any replica, but can only write to the leader.
+- Sharded databases have one leader per shard
+- Used widely, like in PostgreSQL, MySQL, Oracle, SQL Server, MongoDB, DynamoDB, Kafka, and in concensus algorithms like Raft (Used in CockroachDB, TiDB, etc, RabbitMQ Quorum queues)
 
 ### Synchronous Versus Asychronous Replication
 
